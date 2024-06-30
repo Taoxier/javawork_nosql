@@ -25,7 +25,9 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.jar.JarEntry;
@@ -67,7 +69,7 @@ public class NormalStore implements Store {
     /**
      * 持久化阈值
      */
-//    private final int storeThreshold;
+    private final int storeThreshold=1000;
 
     public NormalStore(String dataDir) {
         this.dataDir = dataDir;
@@ -88,6 +90,7 @@ public class NormalStore implements Store {
     }
 
 
+    //重新加载索引
     public void reloadIndex() {
         try {
             RandomAccessFile file = new RandomAccessFile(this.genFilePath(), RW_MODE);
@@ -114,6 +117,20 @@ public class NormalStore implements Store {
         LoggerUtil.debug(LOGGER, logFormat, "reload index: "+index.toString());
     }
 
+    public void storeTable(TreeMap<String,Command> memTable){
+        for (Map.Entry<String,Command> entry:memTable.entrySet()){
+            String key=entry.getKey();//键
+            Command command=entry.getValue();//值
+            byte[] commandBytes=JSONObject.toJSONBytes(command);
+            RandomAccessFileUtil.writeInt(this.genFilePath(),commandBytes.length);
+            int pos=RandomAccessFileUtil.write(this.genFilePath(),commandBytes);
+            //添加索引
+            CommandPos cmdPos=new CommandPos(pos,commandBytes.length);
+            index.put(key,cmdPos);
+        }
+    }
+
+
     @Override
     public void set(String key, String value) {
         try {
@@ -122,10 +139,23 @@ public class NormalStore implements Store {
             // 加锁
             indexLock.writeLock().lock();
             // TODO://先写内存表，内存表达到一定阀值再写进磁盘
+            //先写wal
+            writerReader.writeInt(commandBytes.length);
+            writerReader.write(commandBytes);
+            //写内存表
+            memTable.put(key,command);
+
+            //内存表达到一定阀值，写进磁盘
+            if (memTable.size()>storeThreshold){
+
+            }
+
+
             // 写table（wal）文件
             RandomAccessFileUtil.writeInt(this.genFilePath(), commandBytes.length);
             int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
             // 保存到memTable
+
             // 添加索引
             CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
             index.put(key, cmdPos);
@@ -133,6 +163,7 @@ public class NormalStore implements Store {
         } catch (Throwable t) {
             throw new RuntimeException(t);
         } finally {
+            //解锁
             indexLock.writeLock().unlock();
         }
     }
@@ -173,10 +204,16 @@ public class NormalStore implements Store {
             // 加锁
             indexLock.writeLock().lock();
             // TODO://先写内存表，内存表达到一定阀值再写进磁盘
+            //写入内存表
+
+            writerReader.write(commandBytes);
+
+
 
             // 写table（wal）文件
             int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
             // 保存到memTable
+
 
             // 添加索引
             CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
