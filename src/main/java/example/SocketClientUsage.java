@@ -18,7 +18,14 @@ public class SocketClientUsage {
 //        client.get("zsy1");
         client.set("zsy12","for test");
         client.get("zsy12");
-        client.rm("zsy12");
-        client.get("zsy12");
+//        client.rm("zsy12");
+//        client.get("zsy12");
+
+        client.set("haha","aaaaaaaa");
+        client.get("haha");
+
+
+
+
     }
 }
