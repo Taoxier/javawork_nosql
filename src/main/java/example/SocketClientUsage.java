@@ -32,8 +32,5 @@ public class SocketClientUsage {
         client.set("what","nihaonihao");
         client.get("what");
 
-
-
-
     }
 }
