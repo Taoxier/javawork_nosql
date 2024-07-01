@@ -21,6 +21,7 @@ import utils.LoggerUtil;
 import utils.RandomAccessFileUtil;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +36,7 @@ import java.util.jar.JarEntry;
 public class NormalStore implements Store {
 
     public static final String TABLE = ".table";
+    public static final String WAL="wal";
     public static final String RW_MODE = "rw";
     public static final String NAME = "data";
     private final Logger LOGGER = LoggerFactory.getLogger(NormalStore.class);
@@ -69,7 +71,7 @@ public class NormalStore implements Store {
     /**
      * 持久化阈值
      */
-    private final int storeThreshold=1000;
+    private final int storeThreshold=1;
 
     public NormalStore(String dataDir) {
         this.dataDir = dataDir;
@@ -83,10 +85,21 @@ public class NormalStore implements Store {
             file.mkdirs();
         }
         this.reloadIndex();
+
+        //---------------------
+        try {
+            this.writerReader=new RandomAccessFile(this.genWalPath(),RW_MODE);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+        //--------------
     }
 
     public String genFilePath() {
         return this.dataDir + File.separator + NAME + TABLE;
+    }
+    public String genWalPath(){
+        return this.dataDir+File.separator+WAL;
     }
 
 
@@ -117,6 +130,7 @@ public class NormalStore implements Store {
         LoggerUtil.debug(LOGGER, logFormat, "reload index: "+index.toString());
     }
 
+    //把内存表写入磁盘
     public void storeTable(TreeMap<String,Command> memTable){
         for (Map.Entry<String,Command> entry:memTable.entrySet()){
             String key=entry.getKey();//键
@@ -128,6 +142,8 @@ public class NormalStore implements Store {
             CommandPos cmdPos=new CommandPos(pos,commandBytes.length);
             index.put(key,cmdPos);
         }
+        //重置内存表
+        memTable=new TreeMap<>();
     }
 
 
@@ -139,7 +155,7 @@ public class NormalStore implements Store {
             // 加锁
             indexLock.writeLock().lock();
             // TODO://先写内存表，内存表达到一定阀值再写进磁盘
-            //先写wal
+            //写wal
             writerReader.writeInt(commandBytes.length);
             writerReader.write(commandBytes);
             //写内存表
@@ -147,10 +163,10 @@ public class NormalStore implements Store {
 
             //内存表达到一定阀值，写进磁盘
             if (memTable.size()>storeThreshold){
-
+                storeTable(memTable);
             }
 
-
+            /*------
             // 写table（wal）文件
             RandomAccessFileUtil.writeInt(this.genFilePath(), commandBytes.length);
             int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
@@ -160,6 +176,7 @@ public class NormalStore implements Store {
             CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
             index.put(key, cmdPos);
             // TODO://判断是否需要将内存表中的值写回table
+            -------*/
         } catch (Throwable t) {
             throw new RuntimeException(t);
         } finally {
@@ -173,14 +190,21 @@ public class NormalStore implements Store {
         try {
             indexLock.readLock().lock();
             // 从索引中获取信息
-            CommandPos cmdPos = index.get(key);
-            if (cmdPos == null) {
-                return null;
-            }
-            byte[] commandBytes = RandomAccessFileUtil.readByIndex(this.genFilePath(), cmdPos.getPos(), cmdPos.getLen());
+            //先从内存表中找
+            Command cmd;
+            cmd=memTable.get(key);
 
-            JSONObject value = JSONObject.parseObject(new String(commandBytes));
-            Command cmd = CommandUtil.jsonToCommand(value);
+            if (cmd==null) {
+                //如果内存表中没有，则在索引里找
+                CommandPos cmdPos = index.get(key);
+                if (cmdPos == null) {
+                    return null;
+                }
+                byte[] commandBytes = RandomAccessFileUtil.readByIndex(this.genFilePath(), cmdPos.getPos(), cmdPos.getLen());
+                JSONObject value = JSONObject.parseObject(new String(commandBytes));
+                cmd = CommandUtil.jsonToCommand(value);
+            }
+
             if (cmd instanceof SetCommand) {
                 return ((SetCommand) cmd).getValue();
             }
@@ -205,21 +229,23 @@ public class NormalStore implements Store {
             indexLock.writeLock().lock();
             // TODO://先写内存表，内存表达到一定阀值再写进磁盘
             //写入内存表
-
+            writerReader.writeInt(commandBytes.length);
             writerReader.write(commandBytes);
+            memTable.put(key,command);
 
+            if (memTable.size()>storeThreshold){
+                storeTable(memTable);
+            }
 
-
+            /*----------
             // 写table（wal）文件
             int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
             // 保存到memTable
-
-
             // 添加索引
             CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
             index.put(key, cmdPos);
-
             // TODO://判断是否需要将内存表中的值写回table
+             -------------*/
 
         } catch (Throwable t) {
             throw new RuntimeException(t);

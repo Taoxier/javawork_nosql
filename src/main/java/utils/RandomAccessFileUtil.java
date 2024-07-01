@@ -43,6 +43,7 @@ public class RandomAccessFileUtil {
         }
     }
 
+    //根据索引取数据
     public static byte[] readByIndex(String filePath, int index, int len) {
         RandomAccessFile file = null;
         byte[] res = new byte[len];
