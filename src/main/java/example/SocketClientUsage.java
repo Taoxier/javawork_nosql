@@ -22,15 +22,17 @@ public class SocketClientUsage {
 //        client.get("zsy12");
 
         client.set("haha","aaaaaaaa");
+        client.set("wc","nd");
         client.get("haha");
         client.rm("haha");
         client.get("haha");
-
-        client.set("abcde","hihihihihihihhi");
-        client.get("abcde");
-        client.set("what","nani");
-        client.set("what","nihaonihao");
-        client.get("what");
+        client.get("wc");
+//
+//        client.set("abcde","hihihihihihihhi");
+//        client.get("abcde");
+//        client.set("what","nani");
+//        client.set("what","nihaonihao");
+//        client.get("what");
 
     }
 }
