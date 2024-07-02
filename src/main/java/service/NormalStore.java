@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
@@ -46,7 +47,16 @@ public class NormalStore implements Store {
     private final String logFormat = "[NormalStore][{}]: {}";
 
     private final int STORE_THRESHOLD = 1;
-    private final int LOG_COMPRESSION_THRESHOLD = 1;
+    private final int LOG_COMPRESSION_THRESHOLD = 2;
+
+
+    /*
+        1.内存，三个表，稀疏索引，查的时候按稀疏索引，看tinykvstore
+        2.多线程压缩，看那个3.log那个思路
+     */
+
+
+
 
 
     /**
@@ -173,32 +183,6 @@ public class NormalStore implements Store {
     }
 
     //实现压缩
-//    private void compressLogFile() {
-//        TreeMap<String, Command> latestCommands = deduplicateCommands();
-//        String newLogFile = getNextLogFileGenName(); // 生成新的日志文件名
-//        try (RandomAccessFile newRaf = new RandomAccessFile(newLogFile, RW_MODE)) {
-//            for (Map.Entry<String, Command> entry : latestCommands.entrySet()) {
-//                Command command = entry.getValue();
-//                byte[] cmdBytes = JSONObject.toJSONBytes(command);
-//                RandomAccessFileUtil.writeInt(newLogFile, cmdBytes.length);
-//                RandomAccessFileUtil.write(newLogFile, cmdBytes);
-//            }
-//        } catch (IOException e) {
-//            throw new RuntimeException("Error writing to the new compressed log file", e);
-//        }
-//
-//        // 替换原日志文件
-//        File originalFile = new File(genFilePath());
-//        if (!originalFile.renameTo(new File(originalFile.getParent(), "backup_" + originalFile.getName()))) {
-//            throw new RuntimeException("Failed to rename original log file.");
-//        }
-//        if (!new File(newLogFile).renameTo(originalFile)) {
-//            throw new RuntimeException("Failed to rename new compressed log file to original.");
-//        }
-//        // 重新加载索引，以适应新的日志文件结构
-//        reloadIndex();
-//    }
-
     private void compressLogFile() {
         TreeMap<String, Command> latestCommands = deduplicateCommands();
         String newLogFile = getNextLogFileGenName(); // 生成新的日志文件名
@@ -223,17 +207,10 @@ public class NormalStore implements Store {
         }
 
         // 替换原日志文件
-        File originalFile = new File(genFilePath());
-        File backupFile = new File(originalFile.getParent(), "backup_" + originalFile.getName());
-
-        // 确保备份文件不冲突，这里简化处理
-        if (!originalFile.renameTo(backupFile)) {
-            throw new RuntimeException("Failed to rename original log file to backup.");
-        }
-
         // 使用Files.move进行原子性替换原文件
         try {
-            Files.move(Paths.get(newLogFile), Paths.get(originalFile.getAbsolutePath()), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+//            Files.move(Paths.get(newLogFile), Paths.get(originalFile.getAbsolutePath()), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(Paths.get(newLogFile), Paths.get(this.genFilePath()), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
             throw new RuntimeException("Failed to atomically replace original log file with compressed one", e);
         }
@@ -245,26 +222,32 @@ public class NormalStore implements Store {
 
     //把内存表写入磁盘
     public void storeTable(TreeMap<String, Command> memTable) {
+        try {
 
-        File logFile = new File(this.genFilePath(), RW_MODE);
-//        if (logFile.length() > compressionThreshold) {
-            System.out.println("超过大小，开始压缩");
-            compressLogFile();
-            System.out.println("压缩结束");
-//        }
-
-        for (Map.Entry<String, Command> entry : memTable.entrySet()) {
-            String key = entry.getKey();//键
-            Command command = entry.getValue();//值
-            byte[] commandBytes = JSONObject.toJSONBytes(command);
-            RandomAccessFileUtil.writeInt(this.genFilePath(), commandBytes.length);
-            int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
-            //添加索引
-            CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
-            index.put(key, cmdPos);
+            for (Map.Entry<String, Command> entry : memTable.entrySet()) {
+                String key = entry.getKey();//键
+                Command command = entry.getValue();//值
+                byte[] commandBytes = JSONObject.toJSONBytes(command);
+                RandomAccessFileUtil.writeInt(this.genFilePath(), commandBytes.length);
+                int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
+                //添加索引
+                CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
+                index.put(key, cmdPos);
+            }
+        } catch (Throwable t) {
+            throw new RuntimeException(t);
         }
         //重置内存表
         memTable = new TreeMap<>();
+
+        File logFile = new File(this.genFilePath(), "r");
+//        if (logFile.length() > compressionThreshold) {
+//        System.out.println("超过大小，开始压缩");
+        compressLogFile();
+//        System.out.println("压缩结束");
+
+//        }
+
     }
 
 

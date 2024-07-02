@@ -27,12 +27,12 @@ public class SocketClientUsage {
         client.rm("haha");
         client.get("haha");
         client.get("wc");
-//
-//        client.set("abcde","hihihihihihihhi");
-//        client.get("abcde");
-//        client.set("what","nani");
-//        client.set("what","nihaonihao");
-//        client.get("what");
+
+        client.set("abcde","hihihihihihihhi");
+        client.get("abcde");
+        client.set("what","nani");
+        client.set("what","nihaonihao");
+        client.get("what");
 
     }
 }
