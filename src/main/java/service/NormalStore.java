@@ -29,10 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TreeMap;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.jar.JarEntry;
@@ -41,6 +38,7 @@ public class NormalStore implements Store {
 
     public static final String TABLE = ".table";
     public static final String WAL = "wal";
+    public static final String WAL_TMP = "walTmp";
     public static final String RW_MODE = "rw";
     public static final String NAME = "data";
     private final Logger LOGGER = LoggerFactory.getLogger(NormalStore.class);
@@ -51,23 +49,29 @@ public class NormalStore implements Store {
 
 
     /*
-        1.内存，三个表，稀疏索引，查的时候按稀疏索引，看tinykvstore
+        1.内存，三个区，稀疏索引，查的时候按稀疏索引，看tinykvstore
         2.多线程压缩，看那个3.log那个思路
      */
-
-
-
 
 
     /**
      * 内存表，类似缓存
      */
     private TreeMap<String, Command> memTable;
+    /**
+     * 不可变内存表，用于持久化内存表中时暂存数据
+     */
+    private TreeMap<String, Command> immutableMemTable;
 
     /**
      * hash索引，存的是数据长度和偏移量
      */
     private HashMap<String, CommandPos> index;
+
+    /**
+     * ssTable列表
+     */
+//    private final LinkedList<Sstable> ssTables;
 
     /**
      * 数据目录
