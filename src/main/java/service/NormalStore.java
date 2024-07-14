@@ -71,7 +71,7 @@ public class NormalStore implements Store {
     /**
      * ssTable列表
      */
-//    private final LinkedList<Sstable> ssTables;
+//    private final LinkedList<SsTable> ssTables;
 
     /**
      * 数据目录
@@ -224,6 +224,7 @@ public class NormalStore implements Store {
     }
 
 
+
     //把内存表写入磁盘
     public void storeTable(TreeMap<String, Command> memTable) {
         try {
@@ -255,6 +256,13 @@ public class NormalStore implements Store {
     }
 
 
+/**
+* @描述  增改
+* @param key
+* @param value
+* @return void
+* @Author taoxier
+*/
     @Override
     public void set(String key, String value) {
         try {
@@ -293,6 +301,12 @@ public class NormalStore implements Store {
         }
     }
 
+/**
+* @描述  获取
+* @param key
+* @return String
+* @Author taoxier
+*/
     @Override
     public String get(String key) {
         try {
@@ -328,6 +342,12 @@ public class NormalStore implements Store {
         return null;
     }
 
+    /**
+    * @描述  删除
+    * @param key
+    * @return void
+    * @Author taoxier
+    */
     @Override
     public void rm(String key) {
         try {
