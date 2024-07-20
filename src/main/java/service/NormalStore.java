@@ -14,6 +14,7 @@ import model.command.Command;
 import model.command.CommandPos;
 import model.command.RmCommand;
 import model.command.SetCommand;
+import model.sstable.SsTable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import utils.CommandUtil;
@@ -44,8 +45,8 @@ public class NormalStore implements Store {
     private final Logger LOGGER = LoggerFactory.getLogger(NormalStore.class);
     private final String logFormat = "[NormalStore][{}]: {}";
 
-    private final int STORE_THRESHOLD = 1;
-    private final int LOG_COMPRESSION_THRESHOLD = 2;
+//    private final int STORE_THRESHOLD = 1;
+//    private final int LOG_COMPRESSION_THRESHOLD = 2;
 
 
     /*
@@ -66,12 +67,12 @@ public class NormalStore implements Store {
     /**
      * hash索引，存的是数据长度和偏移量
      */
-    private HashMap<String, CommandPos> index;
+    private HashMap<String, CommandPos> index;//---------------
 
     /**
      * ssTable列表
      */
-//    private final LinkedList<SsTable> ssTables;
+    private final LinkedList<SsTable> ssTables;
 
     /**
      * 数据目录
@@ -86,38 +87,101 @@ public class NormalStore implements Store {
     /**
      * 暂存数据的日志句柄
      */
-    private RandomAccessFile writerReader;
+    private RandomAccessFile wal;
+
+    /**
+     * 暂存数据的日志文件
+     */
+    private File walFile;
+
+    /**
+     * 数据分区大小
+     */
+    private final int partSize;
 
     /**
      * 持久化阈值
      */
-    private final int storeThreshold = STORE_THRESHOLD;
+    private final int storeThreshold;
 
     /**
      * 日志压缩大小阈值
      */
-    private final int compressionThreshold = LOG_COMPRESSION_THRESHOLD;
-
-    public NormalStore(String dataDir) {
-        this.dataDir = dataDir;
-        this.indexLock = new ReentrantReadWriteLock();
-        this.memTable = new TreeMap<String, Command>();
-        this.index = new HashMap<>();
-
-        File file = new File(dataDir);
-        if (!file.exists()) {
-            LoggerUtil.info(LOGGER, logFormat, "NormalStore", "dataDir isn't exist,creating...");
-            file.mkdirs();
-        }
-        this.reloadIndex();
-
-        //---------------------
+//    private final int compressionThreshold;
+    public NormalStore(String dataDir, int storeThreshold, int partSize) {
         try {
-            this.writerReader = new RandomAccessFile(this.genWalPath(), RW_MODE);
+            this.dataDir = dataDir;
+            this.storeThreshold = storeThreshold;
+            this.partSize = partSize;
+            this.indexLock = new ReentrantReadWriteLock();
+
+            File dir = new File(dataDir);
+            //数据目录不存在则创建
+            if (!dir.exists()) {
+                LoggerUtil.info(LOGGER, logFormat, "NormalStore", "dataDir isn't exist,creating...");
+                dir.mkdirs();
+            }
+            File[] files = dir.listFiles();
+            //目录为空则不用加载ssTable
+            if (files == null || files.length == 0) {
+                walFile = new File(dataDir + WAL);
+                wal = new RandomAccessFile(walFile, RW_MODE);
+                return;
+            }
+
+            this.ssTables = new LinkedList<>();
+            this.memTable = new TreeMap<String, Command>();
+//            this.index = new HashMap<>();
+//            this.reloadIndex();
+
+            //从大到小加载ssTable
+            TreeMap<Long, SsTable> ssTableTreeMap = new TreeMap<>(Comparator.reverseOrder());//对Long类型的键进行降序排序
+            for (File file : files) {
+                String fileName = file.getName();
+                //如果在持久化ssTable中出现异常，则会留下WAL_TMP，需要从中恢复数据
+                if (file.isFile() && fileName.equals(WAL_TMP)) {
+
+                }
+            }
+
+
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
-        //--------------
+
+
+    }
+
+    /**
+     * @描述 从暂存日志wal中恢复数据
+     * @param wal
+     * @return void
+     * @Author taoxier
+     */
+    private void restoreFromWal(RandomAccessFile wal) {
+        try {
+            long len = wal.length();
+            long start = 0;//开始位置
+            wal.seek(start);//把文件指针跳到开始位置
+            while (start < len) {
+                //先读数据大小
+                int valueLen = wal.readInt();//四个字节
+                //然后根据数据大小来读数据
+                byte[] bytes = new byte[valueLen];
+                wal.read(bytes);//读
+                JSONObject value = JSON.parseObject(new String((bytes), StandardCharsets.UTF_8));
+                Command command = CommandUtil.jsonToCommand(value);//将JSON对象转换为command
+                if (command != null) {
+                    //如果转换成功，则把数据放进内存表
+                    memTable.put(command.getKey(), command);
+                }
+                start += 4;
+                start += valueLen;//跳过数据长度
+            }
+            wal.seek(wal.length());//跳到文件末尾
+        } catch (Throwable t) {
+            throw new RuntimeException(t);
+        }
     }
 
     public String genFilePath() {
@@ -224,7 +288,6 @@ public class NormalStore implements Store {
     }
 
 
-
     //把内存表写入磁盘
     public void storeTable(TreeMap<String, Command> memTable) {
         try {
@@ -256,13 +319,13 @@ public class NormalStore implements Store {
     }
 
 
-/**
-* @描述  增改
-* @param key
-* @param value
-* @return void
-* @Author taoxier
-*/
+    /**
+     * @描述 增改
+     * @param key
+     * @param value
+     * @return void
+     * @Author taoxier
+     */
     @Override
     public void set(String key, String value) {
         try {
@@ -301,12 +364,12 @@ public class NormalStore implements Store {
         }
     }
 
-/**
-* @描述  获取
-* @param key
-* @return String
-* @Author taoxier
-*/
+    /**
+     * @描述 获取
+     * @param key
+     * @return String
+     * @Author taoxier
+     */
     @Override
     public String get(String key) {
         try {
@@ -343,11 +406,11 @@ public class NormalStore implements Store {
     }
 
     /**
-    * @描述  删除
-    * @param key
-    * @return void
-    * @Author taoxier
-    */
+     * @描述 删除
+     * @param key
+     * @return void
+     * @Author taoxier
+     */
     @Override
     public void rm(String key) {
         try {
