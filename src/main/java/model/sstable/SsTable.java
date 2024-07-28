@@ -2,7 +2,6 @@ package model.sstable;
 
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
-import jdk.javadoc.internal.doclets.formats.html.NestedClassWriterImpl;
 import model.Position;
 import model.command.Command;
 import model.command.RmCommand;
@@ -29,8 +28,9 @@ import java.util.function.Consumer;
  */
 public class SsTable implements Closeable {
 
-    private static final String RW_MODE = "rw";
+    private static final String RW = "rw";
     private final Logger LOGGER = LoggerFactory.getLogger(SsTable.class);
+    private final String logFormat = "[SsTable][{}][{}]: {}";
 
     /**
      * 稀疏索引
@@ -57,7 +57,7 @@ public class SsTable implements Closeable {
         this.tableMetaInfo.setPartSize(partSize);
         this.filePath = filePath;
         try {
-            this.tableFile = new RandomAccessFile(filePath, RW_MODE);
+            this.tableFile = new RandomAccessFile(filePath, RW);
             tableFile.seek(0);
         } catch (Throwable t) {
             throw new RuntimeException(t);
@@ -135,11 +135,12 @@ public class SsTable implements Closeable {
             tableMetaInfo.setIndexStart(tableFile.getFilePointer());//记录稀疏索引开始位置
             tableFile.write(indexBytes);//写入稀疏索引
             tableMetaInfo.setIndexLen(indexBytes.length);//记录稀疏索引区长度
-            LoggerUtil.debug(LOGGER, "[SsTable][initFromIndex][sparseIndex]: {}", sparseIndex);
+//            LoggerUtil.debug(LOGGER, "[SsTable][initFromMemTable][sparseIndex]: {}", sparseIndex);
+            LoggerUtil.debug(LOGGER, logFormat, "initFromMemTable", "sparseIndex", sparseIndex);
 
             //保存文件索引信息
             tableMetaInfo.writeToFile(tableFile);
-            LoggerUtil.info(LOGGER, "[SsTable][initFromIndex]: {},{}", filePath, tableMetaInfo);
+            LoggerUtil.info(LOGGER, "[SsTable][initFromMemTable]: {},{}", filePath, tableMetaInfo);
 
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -156,18 +157,21 @@ public class SsTable implements Closeable {
         try {
             //先读取索引内容区
             TableMetaInfo tableMetaInfo = TableMetaInfo.readFromFile(tableFile);
-            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][tableMetaInfo]: {}", tableMetaInfo);
+//            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][tableMetaInfo]: {}", tableMetaInfo);
+            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "tableMetaInfo", tableMetaInfo);
 
             //再读稀疏索引区
             byte[] indexBytes = new byte[(int) tableMetaInfo.getIndexLen()];
             tableFile.seek(tableMetaInfo.getDataStart());//跳到稀疏索引区开始位置
             tableFile.read(indexBytes);//读稀疏索引区
             String indexString = new String(indexBytes, StandardCharsets.UTF_8);
-            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][indexStr]: {}", indexString);
+//            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][indexStr]: {}", indexString);
+            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "indexStr", indexString);
             sparseIndex = JSONObject.parseObject(indexString, new TypeReference<TreeMap<String, Position>>() {
             });//存到稀疏索引
             this.tableMetaInfo = tableMetaInfo;//记录文件索引信息
-            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][sparseIndex]: {}", sparseIndex);
+//            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][sparseIndex]: {}", sparseIndex);
+            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "sparseIndex", sparseIndex);
 
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -233,7 +237,8 @@ public class SsTable implements Closeable {
             if (sparseKeyPositionSection.size() == 0) {
                 return null;
             }
-            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][sparseKeyPositionSection]: {}", sparseKeyPositionSection);
+//            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][sparseKeyPositionSection]: {}", sparseKeyPositionSection);
+            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "sparseKeyPositionSection", sparseKeyPositionSection);
 
             //开始在区间中寻找key
             Position firstKeyPosition = sparseKeyPositionSection.getFirst();//区间第一个位置
@@ -256,7 +261,8 @@ public class SsTable implements Closeable {
 
             for (Position position : sparseKeyPositionSection) {
                 JSONObject dataPartJson = JSONObject.parseObject(new String(dataPart, dataPartStart, (int) position.getLen()));//指定的起始位置和长度
-                LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][dataPartJson]: {}", dataPartJson);
+//                LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][dataPartJson]: {}", dataPartJson);
+                LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "dataPartJson", dataPartJson);
                 if (dataPartJson.containsKey(key)) {
                     JSONObject value = dataPartJson.getJSONObject(key);
                     return CommandUtil.jsonToCommand(value);//将value对象转换为特定的类型，并返回该对象
