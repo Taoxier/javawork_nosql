@@ -111,7 +111,7 @@ public class SsTable implements Closeable {
                 }
 
                 //rm
-                if (cmd instanceof SetCommand) {
+                if (cmd instanceof RmCommand) {
                     RmCommand rm = (RmCommand) cmd;
                     partData.put(rm.getKey(), rm);
                 }
@@ -166,7 +166,7 @@ public class SsTable implements Closeable {
             tableFile.read(indexBytes);//读稀疏索引区
             String indexString = new String(indexBytes, StandardCharsets.UTF_8);
 //            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][indexStr]: {}", indexString);
-            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "indexStr", indexString);
+            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "indexStr",indexString);
             sparseIndex = JSONObject.parseObject(indexString, new TypeReference<TreeMap<String, Position>>() {
             });//存到稀疏索引
             this.tableMetaInfo = tableMetaInfo;//记录文件索引信息

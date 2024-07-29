@@ -67,12 +67,17 @@ public class NormalStore implements Store {
     /**
      * hash索引，存的是数据长度和偏移量
      */
-    private HashMap<String, CommandPos> index;//---------------
+//    private HashMap<String, CommandPos> index;//---------------
 
     /**
      * ssTable列表
      */
-    private  LinkedList<SsTable> ssTables;
+    private LinkedList<SsTable> ssTables;
+
+    /**
+     * ssTable暂存列表，用于压缩时
+     */
+    private LinkedList<SsTable> immutableSsTables;
 
     /**
      * 数据目录
@@ -110,6 +115,14 @@ public class NormalStore implements Store {
 //    private final int compressionThreshold;
 
 
+    /**
+     * @描述 构造方法
+     * @param dataDir
+     * @param storeThreshold
+     * @param partSize
+     * @return null
+     * @Author taoxier
+     */
     public NormalStore(String dataDir, int storeThreshold, int partSize) {
         try {
             this.dataDir = dataDir;
@@ -132,7 +145,7 @@ public class NormalStore implements Store {
             }
 
             this.ssTables = new LinkedList<>();
-            this.memTable = new TreeMap<String, Command>();
+            this.memTable = new TreeMap<>();
 
 //            this.index = new HashMap<>();
 //            this.reloadIndex();
@@ -143,24 +156,24 @@ public class NormalStore implements Store {
                 String fileName = file.getName();
                 //如果在持久化ssTable中出现异常，则会留下WAL_TMP，需要从中恢复数据
                 if (file.isFile() && fileName.equals(WAL_TMP)) {
-                    restoreFromWal(new RandomAccessFile(file,RW_MODE));
+                    restoreFromWal(new RandomAccessFile(file, RW_MODE));
                 }
 
                 //加载ssTable
-                if(file.isFile()&&fileName.endsWith(TABLE)){
+                if (file.isFile() && fileName.endsWith(TABLE)) {
                     //如果是文件，并且是数据文件的话
-                    int dotIndex=fileName.indexOf(".");//找到文件名中第一个点.的位置，返回点的索引
-                    Long time=Long.parseLong(fileName.substring(0,dotIndex));//从文件名中提取出时间戳部分，即从文件名的开始到第一个点之间的字符，然后将其解析为一个 Long 类型的数字
-                    ssTableTreeMap.put(time,SsTable.createFromFile(file.getAbsolutePath()));//放入该文件存的SsTable
-                }else if(file.isFile()&&fileName.endsWith(WAL)){
+                    int dotIndex = fileName.indexOf(".");//找到文件名中第一个点.的位置，返回点的索引
+                    Long time = Long.parseLong(fileName.substring(0, dotIndex));//从文件名中提取出时间戳部分，即从文件名的开始到第一个点之间的字符，然后将其解析为一个 Long 类型的数字
+                    ssTableTreeMap.put(time, SsTable.createFromFile(file.getAbsolutePath()));//放入该文件存的SsTable
+                } else if (file.isFile() && fileName.endsWith(WAL)) {
                     //如果是wal文件，则加载wal
-                    walFile=file;
-                    wal=new RandomAccessFile(file,RW_MODE);
+                    walFile = file;
+                    wal = new RandomAccessFile(file, RW_MODE);
                     restoreFromWal(wal);
                 }
             }
             ssTables.addAll(ssTableTreeMap.values());//把所有表存进SsTable
-            LoggerUtil.debug(LOGGER,logFormat,"createFromFile"+ ssTables);
+            LoggerUtil.debug(LOGGER, logFormat, "createFromFile" + ssTables);
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
@@ -305,64 +318,77 @@ public class NormalStore implements Store {
 
 
     /**
-    * @描述  切换内存表  在持久化内存表时，新建一个用，存旧的内存表
-    * @param
-    * @return void
-    * @Author taoxier
-    */
-    private void switchMemTable(){
+     * @描述 切换内存表  在持久化内存表时，新建一个用，存旧的内存表
+     * @param
+     * @return void
+     * @Author taoxier
+     */
+    private void switchMemTable() {
         try {
             indexLock.writeLock().lock();
             //切换内存表
-            immutableMemTable=memTable;//不可变内存表，暂存数据
-            memTable=new TreeMap<>();
+            immutableMemTable = memTable;//不可变内存表，暂存数据
+            memTable = new TreeMap<>();
             //切换内存表的同时也切换wal
             wal.close();
-            File tmpWal=new File(dataDir+WAL_TMP);
-            if (tmpWal.exists()){
-                if (!tmpWal.delete()){
+            File tmpWal = new File(dataDir + WAL_TMP);
+            if (tmpWal.exists()) {
+                if (!tmpWal.delete()) {
                     //如果存在暂存wal文件，尝试删除，如果不能删则抛出异常
                     throw new RuntimeException("-[异常抛出]：删除 'tmpWal' 失败");
                 }
             }
-            if (!walFile.renameTo(tmpWal)){
+            if (!walFile.renameTo(tmpWal)) {
                 throw new RuntimeException("-[异常抛出]：重命名 'walFile' 变为 'tmpWal' 失败");
             }
-            walFile=new File(dataDir+WAL);
-            wal=new RandomAccessFile(walFile,RW_MODE);
+            walFile = new File(dataDir + WAL);
+            wal = new RandomAccessFile(walFile, RW_MODE);
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         } catch (IOException e) {
             throw new RuntimeException(e);
-        }finally {
+        } finally {
             indexLock.writeLock().unlock();
-            LoggerUtil.debug(LOGGER,logFormat,"switchMemTable");
+            LoggerUtil.debug(LOGGER, logFormat, "switchMemTable");
         }
     }
 
     /**
-    * @描述  把内存表持久化到SsTable
-    * @param
-    * @return void
-    * @Author taoxier
-    */
-private void storeSsTable(){
-    try {
-        SsTable ssTable=SsTable.createFromMemTable(dataDir+System.currentTimeMillis()+TABLE,partSize,immutableMemTable);//按照时间命名 创内存表对应的ssTable
-        ssTables.addFirst(ssTable);//插在开头
+     * @描述 把内存表持久化到SsTable
+     * @param
+     * @return void
+     * @Author taoxier
+     */
+    private void storeSsTable() {
+        try {
+            SsTable ssTable = SsTable.createFromMemTable(dataDir + System.currentTimeMillis() + TABLE, partSize, immutableMemTable);//按照时间命名 创内存表对应的ssTable
+            ssTables.addFirst(ssTable);//插在开头
 
-        //存完了可以重置暂存内存表和删临时Wal
-        immutableMemTable=null;
-        File tmpWal=new File(dataDir+WAL_TMP);
-        if (tmpWal.exists()){
-            if (!tmpWal.delete()){
-                throw new RuntimeException("-[异常抛出]：删除 'tmpWal' 失败");
+            //存完了可以重置暂存内存表和删临时Wal
+            immutableMemTable = null;
+            File tmpWal = new File(dataDir + WAL_TMP);
+            if (tmpWal.exists()) {
+                if (!tmpWal.delete()) {
+                    throw new RuntimeException("-[异常抛出]：删除 'tmpWal' 失败");
+                }
             }
+        } catch (RuntimeException e) {
+            throw new RuntimeException(e);
         }
-    } catch (RuntimeException e) {
-        throw new RuntimeException(e);
     }
-}
+
+    /**
+     * @描述 压缩时切换ssTables列表
+     * @param
+     * @return void
+     * @Author taoxier
+     */
+//    private void switchSsTales(){
+//        try {
+//            indexLock.writeLock().lock();
+//
+//        }
+//    }
 
     //把内存表写入磁盘
 //    public void storeTable(TreeMap<String, Command> memTable) {
@@ -423,18 +449,6 @@ private void storeSsTable(){
                 //持久化到SsTable
                 storeSsTable();
             }
-
-            /*------
-            // 写table（wal）文件
-            RandomAccessFileUtil.writeInt(this.genFilePath(), commandBytes.length);
-            int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
-            // 保存到memTable
-
-            // 添加索引
-            CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
-            index.put(key, cmdPos);
-            // TODO://判断是否需要将内存表中的值写回table
-            -------*/
         } catch (Throwable t) {
             throw new RuntimeException(t);
         } finally {
@@ -453,35 +467,38 @@ private void storeSsTable(){
     public String get(String key) {
         try {
             indexLock.readLock().lock();
-            // 从索引中获取信息
             //先从内存表中找
-            Command cmd;
-            cmd = memTable.get(key);
-
-            if (cmd == null) {
-                //如果内存表中没有，则在索引里找
-                CommandPos cmdPos = index.get(key);
-                if (cmdPos == null) {
-                    return null;
+            Command command;
+            command = memTable.get(key);
+            if (command == null && immutableMemTable != null) {
+                //如果找不到，可能处于持久化过程中，从暂存内存表中找
+                command = immutableMemTable.get(key);
+            }
+            //如果还没有，那在ssTable中找，从新的找到旧
+            if (command == null) {
+                for (SsTable ssTable : ssTables) {
+                    command = ssTable.query(key);
+                    if (command != null) {
+                        //找到就退出循环
+                        break;
+                    }
                 }
-                byte[] commandBytes = RandomAccessFileUtil.readByIndex(this.genFilePath(), cmdPos.getPos(), cmdPos.getLen());
-                JSONObject value = JSONObject.parseObject(new String(commandBytes));
-                cmd = CommandUtil.jsonToCommand(value);
             }
 
-            if (cmd instanceof SetCommand) {
-                return ((SetCommand) cmd).getValue();
+            if (command instanceof SetCommand) {
+                //如果是set命令 返回对应的值
+                return ((SetCommand) command).getValue();
             }
-            if (cmd instanceof RmCommand) {
+            if (command instanceof RmCommand) {
+                //如果是rm命令 返回null
                 return null;
             }
-
+            return null;//没有这个key，get函数返回null
         } catch (Throwable t) {
             throw new RuntimeException(t);
         } finally {
             indexLock.readLock().unlock();
         }
-        return null;
     }
 
     /**
@@ -497,26 +514,17 @@ private void storeSsTable(){
             byte[] commandBytes = JSONObject.toJSONBytes(command);
             // 加锁
             indexLock.writeLock().lock();
-            // TODO://先写内存表，内存表达到一定阀值再写进磁盘
-            //写入内存表
-            writerReader.writeInt(commandBytes.length);
-            writerReader.write(commandBytes);
+
+            //写wal
+            wal.writeInt(commandBytes.length);
+            wal.write(commandBytes);
+            //写内存表
             memTable.put(key, command);
-
+            //内存表过阈值就持久化
             if (memTable.size() > storeThreshold) {
-                storeTable(memTable);
+                switchMemTable();
+                storeSsTable();
             }
-
-            /*----------
-            // 写table（wal）文件
-            int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
-            // 保存到memTable
-            // 添加索引
-            CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
-            index.put(key, cmdPos);
-            // TODO://判断是否需要将内存表中的值写回table
-             -------------*/
-
         } catch (Throwable t) {
             throw new RuntimeException(t);
         } finally {
@@ -524,8 +532,16 @@ private void storeSsTable(){
         }
     }
 
-    @Override
+    /**
+     * @描述 关掉关掉全部关掉
+     * @param
+     * @return void
+     * @Author taoxier
+     */
     public void close() throws IOException {
-
+        wal.close();
+        for (SsTable ssTable : ssTables) {
+            ssTable.close();
+        }
     }
 }

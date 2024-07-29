@@ -40,9 +40,9 @@ public class SocketServerHandler implements Runnable {
             // 接收序列化对象
             ActionDTO dto = (ActionDTO) ois.readObject();
             LoggerUtil.debug(LOGGER, "[SocketServerHandler][ActionDTO]: {}", dto.toString());
-            System.out.println("" + dto.toString());
+//            System.out.println("" + dto.toString());
 
-            // 处理命令逻辑(TODO://改成可动态适配的模式)
+            // 处理命令逻辑
             if (dto.getType() == ActionTypeEnum.GET) {
                 String value = this.store.get(dto.getKey());
                 LoggerUtil.debug(LOGGER, "[SocketServerHandler][run]: {}", "get action resp" + dto.toString());
