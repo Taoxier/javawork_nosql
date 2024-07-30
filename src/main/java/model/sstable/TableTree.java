@@ -1,149 +1,94 @@
-//package model.sstable;
-//import java.io.File;
+//import model.Position;
+//
 //import java.io.IOException;
 //import java.nio.file.Files;
+//import java.nio.file.Paths;
+//import java.util.concurrent.locks.Lock;
+//import java.util.concurrent.locks.ReentrantLock;
 //import java.util.logging.Level;
 //import java.util.logging.Logger;
-///**
-// * @Author taoxier
-// * @Date 2024/7/29 3:07
-// * @描述
-// */
 //
+//public class TableTree {
+//    private static final Logger logger = Logger.getLogger(TableTree.class.getName());
+//    private static final int MAX_LEVELS = 10;
+//    private LevelNode[] levels;
+//    private final Lock lock = new ReentrantLock();
 //
+//    // 压缩当前层的文件到下一层，只能被 majorCompaction() 调用
+//    public void majorCompactionLevel(int level) {
+//        logger.log(Level.INFO, "Compressing layer " + level + " files");
+//        long start = System.currentTimeMillis();
 //
-//    class TableNode {
-//        int index;          // 节点的索引
-//        SSTable table;      // 指向 SSTable 的引用
-//        TableNode next;     // 指向下一个节点
+//        logger.log(Level.INFO, "Compressing layer " + level + ".db files");
 //
-//        public TableNode(int index, SSTable table) {
-//            this.index = index;
-//            this.table = table;
-//            this.next = null;
-//        }
-//    }
+//        // 用于加载一个 SSTable 的数据区到缓存中
+//        byte[] tableCache = new byte[levelMaxSize[level]];
+//        LevelNode currentNode = levels[level];
 //
-//     class LinkedList {
-//        private TableNode head; // 链表的头节点
+//        // 将当前层的 SSTable 合并到一个有序二叉树中
+//        SortTree memoryTree = new SortTree();
+//        memoryTree.init();
 //
-//        public LinkedList() {
-//            head = null;
-//        }
+//        lock.lock();
+//        try {
+//            while (currentNode != null) {
+//                Table table = currentNode.table;
 //
-//        // 插入新节点的方法
-//        public void insert(TableNode newNode) {
-//            if (head == null) {
-//                head = newNode; // 如果链表为空，则新节点成为头节点
-//                return;
-//            }
-//
-//            TableNode node = head;
-//            while (node != null) {
-//                if (node.next == null) {
-//                    newNode.index = node.index + 1; // 设置新节点的索引
-//                    node.next = newNode; // 将当前节点的 next 指向新节点
-//                    break; // 退出循环
-//                } else {
-//                    node = node.next; // 移动到下一个节点
+//                // 将 SSTable 的数据区加载到 tableCache 内存中
+//                if (tableCache.length < table.tableMetaInfo.dataLen) {
+//                    tableCache = new byte[table.tableMetaInfo.dataLen];
 //                }
-//            }
-//        }
-//    }
+//                byte[] newSlice = new byte[table.tableMetaInfo.dataLen];
 //
-//
-//
-//    public class TableTree {
-//        private static final Logger logger = Logger.getLogger(TableTree.class.getName());
-//        private TableNode[] levels; // 假设 levels 是一个数组，存储每一层的 SSTable
-//        private final Object lock = new Object(); // 用于线程安全
-//        private static final int MAX_LEVEL = 10;
-//
-//        public void check() {
-//            majorCompaction();
-//        }
-//
-//        private void majorCompaction() {
-//            Config con = Config.getConfig(); // 假设有一个 Config 类用于获取配置
-//            for (int levelIndex = 0; levelIndex < levels.length; levelIndex++) {
-//                int tableSize = getLevelSize(levelIndex) / (1000 * 1000); // 转为 MB
-//                // 检查当前层的 SSTable 数量和大小
-//                if (getCount(levelIndex) > con.getPartSize() || tableSize > LevelMaxSize[levelIndex]) {
-//                    majorCompactionLevel(levelIndex);
+//                // 读取 SSTable 的数据区
+//                try {
+//                    table.f.seek(0);
+//                    table.f.read(newSlice);
+//                } catch (IOException e) {
+//                    logger.log(Level.SEVERE, "Error reading file " + table.filePath, e);
+//                    throw new RuntimeException(e);
 //                }
-//            }
-//        }
 //
-//        private void majorCompactionLevel(int level) {
-//            logger.log(Level.INFO, "Compressing layer {0} files", level);
-//            long start = System.currentTimeMillis();
-//            try {
-//                logger.log(Level.INFO, "Compressing layer {0}.db files", level);
-//                byte[] tableCache = new byte[LevelMaxSize[level]];
-//                TableNode currentNode = levels[level];
-//                SortTree memoryTree = new SortTree(); // 假设有一个 SortTree 类
-//
-//                synchronized (lock) {
-//                    while (currentNode != null) {
-//                        SSTable table = currentNode.table;
-//                        if (tableCache.length < table.getTableMetaInfo().getDataLen()) {
-//                            tableCache = new byte[table.getTableMetaInfo().getDataLen()];
-//                        }
-//                        byte[] newSlice = new byte[table.getTableMetaInfo().getDataLen()];
-//
-//                        // 读取 SSTable 的数据区
-//                        try {
-//                            Files.readAllBytes(new File(table.getFilePath()).toPath());
-//                        } catch (IOException e) {
-//                            logger.log(Level.SEVERE, "Error reading file " + table.getFilePath(), e);
-//                            throw new RuntimeException(e);
-//                        }
-//
-//                        // 读取每一个元素
-//                        for (Map.Entry<Key, Position> entry : table.getSparseIndex().entrySet()) {
-//                            Position position = entry.getValue();
-//                            if (!position.isDeleted()) {
-//                                Value value = KVD.decode(newSlice[position.getStart():(position.getStart() + position.getLen())]);
-//                                memoryTree.set(entry.getKey(), value.getValue());
-//                            } else {
-//                                memoryTree.delete(entry.getKey());
-//                            }
-//                        }
-//                        currentNode = currentNode.next;
+//                // 读取每一个元素
+//                for (Map.Entry<Key, Position> entry : table.sparseIndex.entrySet()) {
+//                    Key k = entry.getKey();
+//                    Position position = entry.getValue();
+//                    if (!position.deleted) {
+//                        Value value = kv.decode(newSlice, position.start, position.len);
+//                        memoryTree.set(k, value.value);
+//                    } else {
+//                        memoryTree.delete(k);
 //                    }
 //                }
-//
-//                // 将 SortTree 压缩合并成一个 SSTable
-//                List<Value> values = memoryTree.getValues();
-//                int newLevel = level + 1;
-//                if (newLevel > MAX_LEVEL) {
-//                    newLevel = MAX_LEVEL;
-//                }
-//                createTable(values, newLevel); // 创建新的 SSTable
-//                clearLevel(level);
-//            } finally {
-//                long elapsed = System.currentTimeMillis() - start;
-//                logger.log(Level.INFO, "Completed compression, consumption of time: {0} ms", elapsed);
+//                currentNode = currentNode.next;
 //            }
+//        } finally {
+//            lock.unlock();
 //        }
 //
-//        private void clearLevel(int level) {
-//            synchronized (lock) {
-//                TableNode oldNode = levels[level];
-//                while (oldNode != null) {
-//                    try {
-//                        oldNode.table.getFile().close(); // 关闭文件
-//                        Files.delete(new File(oldNode.table.getFilePath()).toPath()); // 删除文件
-//                    } catch (IOException e) {
-//                        logger.log(Level.SEVERE, "Error closing or deleting file " + oldNode.table.getFilePath(), e);
-//                        throw new RuntimeException(e);
-//                    }
-//                    oldNode.table = null; // 清理引用
-//                    oldNode = oldNode.next; // 移动到下一个节点
-//                }
-//                levels[level] = null; // 重置该层
-//            }
+//        // 将 SortTree 压缩合并成一个 SSTable
+//        List<Value> values = memoryTree.getValues();
+//        int newLevel = level + 1;
+//
+//        // 目前最多支持 10 层
+//        if (newLevel > MAX_LEVELS) {
+//            newLevel = MAX_LEVELS;
 //        }
 //
-//        // 假设有其他必要的方法，例如 getLevelSize、getCount、createTable 等
+//        // 创建新的 SSTable
+//        createTable(values, newLevel);
+//
+//        // 清理该层的文件
+//        LevelNode oldNode = levels[level];
+//        // 重置该层
+//        if (level < MAX_LEVELS) {
+//            levels[level] = null;
+//            clearLevel(oldNode);
+//        }
+//
+//        long elapsedTime = System.currentTimeMillis() - start;
+//        logger.log(Level.INFO, "Completed compression, consumption of time: " + elapsedTime + " ms");
 //    }
+//
+//    // 其他方法和类的定义...
+//}

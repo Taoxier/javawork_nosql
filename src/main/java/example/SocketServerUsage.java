@@ -18,7 +18,7 @@ public class SocketServerUsage {
         String host = "localhost";
         int port = 12345;
         String dataDir = "data"+ File.separator;
-        Store store = new NormalStore(dataDir,1,1);
+        Store store = new NormalStore(dataDir,1,1,2);
         SocketServerController controller = new SocketServerController(host, port, store);
         controller.startServer();
     }

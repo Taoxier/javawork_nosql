@@ -9,12 +9,15 @@ package service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.TypeReference;
 import controller.SocketServerHandler;
+import model.Position;
 import model.command.Command;
 import model.command.CommandPos;
 import model.command.RmCommand;
 import model.command.SetCommand;
 import model.sstable.SsTable;
+import model.sstable.TableMetaInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import utils.CommandUtil;
@@ -25,6 +28,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -59,15 +64,11 @@ public class NormalStore implements Store {
      * 内存表，类似缓存
      */
     private TreeMap<String, Command> memTable;
+
     /**
      * 不可变内存表，用于持久化内存表中时暂存数据
      */
     private TreeMap<String, Command> immutableMemTable;
-
-    /**
-     * hash索引，存的是数据长度和偏移量
-     */
-//    private HashMap<String, CommandPos> index;//---------------
 
     /**
      * ssTable列表
@@ -112,7 +113,7 @@ public class NormalStore implements Store {
     /**
      * 日志压缩大小阈值
      */
-//    private final int compressionThreshold;
+    private final int compressionThreshold;
 
 
     /**
@@ -123,11 +124,12 @@ public class NormalStore implements Store {
      * @return null
      * @Author taoxier
      */
-    public NormalStore(String dataDir, int storeThreshold, int partSize) {
+    public NormalStore(String dataDir, int storeThreshold, int partSize, int compressionThreshold) {
         try {
             this.dataDir = dataDir;
             this.storeThreshold = storeThreshold;
             this.partSize = partSize;
+            this.compressionThreshold = compressionThreshold;
             this.indexLock = new ReentrantReadWriteLock();
 
             File dir = new File(dataDir);
@@ -174,6 +176,7 @@ public class NormalStore implements Store {
             }
             ssTables.addAll(ssTableTreeMap.values());//把所有表存进SsTable
             LoggerUtil.debug(LOGGER, logFormat, "createFromFile" + ssTables);
+
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
@@ -223,6 +226,7 @@ public class NormalStore implements Store {
     public String getNextLogFileGenName() {
         return this.dataDir + File.separator + NAME + "_compress" + TABLE;
     }
+
     //---------------------------------
 
 
@@ -316,7 +320,6 @@ public class NormalStore implements Store {
 //        reloadIndex();
 //    }
 
-
     /**
      * @描述 切换内存表  在持久化内存表时，新建一个用，存旧的内存表
      * @param
@@ -383,43 +386,112 @@ public class NormalStore implements Store {
      * @return void
      * @Author taoxier
      */
-//    private void switchSsTales(){
-//        try {
-//            indexLock.writeLock().lock();
-//
-//        }
-//    }
+    private void switchSsTables() {
+        try {
+            indexLock.writeLock().lock();
+            //切换ssTables列表
+            immutableSsTables = ssTables;
+            //清空ssTables
+            ssTables = new LinkedList<>();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            indexLock.writeLock().unlock();
+            LoggerUtil.debug(LOGGER, logFormat, "switchSsTables");
+        }
+    }
 
-    //把内存表写入磁盘
-//    public void storeTable(TreeMap<String, Command> memTable) {
-//        try {
-//
-//            for (Map.Entry<String, Command> entry : memTable.entrySet()) {
-//                String key = entry.getKey();//键
-//                Command command = entry.getValue();//值
-//                byte[] commandBytes = JSONObject.toJSONBytes(command);
-//                RandomAccessFileUtil.writeInt(this.genFilePath(), commandBytes.length);
-//                int pos = RandomAccessFileUtil.write(this.genFilePath(), commandBytes);
-//                //添加索引
-//                CommandPos cmdPos = new CommandPos(pos, commandBytes.length);
-//                index.put(key, cmdPos);
-//            }
-//        } catch (Throwable t) {
-//            throw new RuntimeException(t);
-//        }
-//        //重置内存表
-//        memTable = new TreeMap<>();
-//
-//        File logFile = new File(this.genFilePath(), "r");
-////        if (logFile.length() > compressionThreshold) {
-////        System.out.println("超过大小，开始压缩");
-//        compressLogFile();
-////        System.out.println("压缩结束");
-//
-////        }
-//
-//    }
+    /**
+     * @描述 压缩数据表
+     * 把列表里的ssTable从新到旧遍历，遇到新的数据就存到表里，遇到重复的数据就下一个
+     * @param
+     * @return void
+     * @Author taoxier
+     */
+    private void compressSsTables() throws IOException {
+        TreeMap<String, Command> compressTable = new TreeMap<>();//去重后存到这里，压缩表
+        for (SsTable ssTable : immutableSsTables) {
+            try {
+                //读稀疏索引和文件句柄
+                TreeMap<String, Position> sparseIndex = ssTable.getSparseIndex();
+                RandomAccessFile tableFile = ssTable.getTableFile();
+                //读文件元信息
+                TableMetaInfo tableMetaInfo = ssTable.getTableMetaInfo();
+                //遍历稀疏索引
+                for (Map.Entry<String, Position> entry : sparseIndex.entrySet()) {
+                    String key = entry.getKey();
+                    Position position = entry.getValue();
+                    long dataStart = position.getStart();
+                    long dataLen = position.getLen();
 
+                    if (!compressTable.containsKey(key)) {
+                        //如果压缩表里没有该key
+                        tableFile.seek(dataStart);//移动到数据开始位置
+                        byte[] partDataBytes = new byte[(int) dataLen];
+
+                        //读具体数据
+                        tableFile.readFully(partDataBytes);
+                        String dataString = new String(partDataBytes, StandardCharsets.UTF_8);
+                        JSONObject dataObject = JSON.parseObject(dataString);
+                        dataObject.keySet().forEach(keyObj -> {
+                            JSONObject cmdObj = dataObject.getJSONObject(keyObj);
+                            Command cmd = CommandUtil.jsonToCommand(cmdObj);
+                            //插到压缩表
+                            if (cmd != null) {
+                                compressTable.put(key, cmd);
+                            }
+                        });
+                    }
+                }
+                tableFile.close();//!!!!!!!---------问题出在这里啊啊啊啊
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        LoggerUtil.debug(LOGGER, logFormat, "compressSsTables");
+
+        //把ssTables都遍历完后，去重的数据都存在压缩表compressTable里
+        //删除对应的数据文件，将压缩表转化成ssTable并加到ssTables列表中
+        try {
+            indexLock.writeLock().lock();
+
+            for (SsTable ssTable : immutableSsTables) {
+                File file = new File(ssTable.getFilePath());
+                if (file.exists()) {
+                    //删除ssTable对应的数据文件
+                    if (!file.delete()) {
+                        throw new RuntimeException("-[异常抛出]：删除ssTable数据文件失败");
+                    }
+
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace(); // 打印详细的异常信息
+        }
+        LoggerUtil.debug(LOGGER, logFormat, "deleteSsTableFile");
+        indexLock.writeLock().unlock();
+
+        SsTable ssTable = SsTable.createFromCompressTable(dataDir + System.currentTimeMillis() + TABLE, partSize, compressTable);//按照时间命名 创内存表对应的ssTable
+
+        ssTables.addFirst(ssTable);//插在开头
+        immutableSsTables = new LinkedList<>();//清空暂存压缩数据表
+        LoggerUtil.debug(LOGGER, logFormat, "addCompressTableToSsTables");
+    }
+
+    /**
+     * @描述 检查是否需要压缩
+     * @param
+     * @return void
+     * @Author taoxier
+     */
+    private void checkIfCompress() throws IOException {
+        if (ssTables.size() > compressionThreshold) {
+            //切换ssTables列表
+            switchSsTables();
+            //压缩
+            compressSsTables();
+        }
+    }
 
     /**
      * @描述 增改
@@ -449,6 +521,9 @@ public class NormalStore implements Store {
                 //持久化到SsTable
                 storeSsTable();
             }
+            //检查是否需要压缩
+            checkIfCompress();
+
         } catch (Throwable t) {
             throw new RuntimeException(t);
         } finally {

@@ -99,7 +99,7 @@ public class SsTable implements Closeable {
      * @return void
      * @Author taoxier
      */
-    private void initFromMemTable(TreeMap<String, Command> memTable) {
+    private void initFromMemTable(TreeMap<String, Command> memTable,String tableType) {
         try {
             JSONObject partData = new JSONObject(true);//保持属性的插入顺序
             tableMetaInfo.setDataStart(tableFile.getFilePointer());//获取当前流在文件中的读/写位置(文件指针)
@@ -136,11 +136,11 @@ public class SsTable implements Closeable {
             tableFile.write(indexBytes);//写入稀疏索引
             tableMetaInfo.setIndexLen(indexBytes.length);//记录稀疏索引区长度
 //            LoggerUtil.debug(LOGGER, "[SsTable][initFromMemTable][sparseIndex]: {}", sparseIndex);
-            LoggerUtil.debug(LOGGER, logFormat, "initFromMemTable", "sparseIndex", sparseIndex);
+            LoggerUtil.debug(LOGGER, logFormat, tableType, "sparseIndex", sparseIndex);
 
             //保存文件索引信息
             tableMetaInfo.writeToFile(tableFile);
-            LoggerUtil.info(LOGGER, "[SsTable][initFromMemTable]: {},{}", filePath, tableMetaInfo);
+            LoggerUtil.info(LOGGER, "[SsTable]["+tableType+"]: {},{}", filePath, tableMetaInfo);
 
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -162,11 +162,12 @@ public class SsTable implements Closeable {
 
             //再读稀疏索引区
             byte[] indexBytes = new byte[(int) tableMetaInfo.getIndexLen()];
-            tableFile.seek(tableMetaInfo.getDataStart());//跳到稀疏索引区开始位置
+            tableFile.seek(tableMetaInfo.getIndexStart());//跳到稀疏索引区开始位置
             tableFile.read(indexBytes);//读稀疏索引区
+
             String indexString = new String(indexBytes, StandardCharsets.UTF_8);
 //            LoggerUtil.debug(LOGGER, "[SsTable][initFromFile][indexStr]: {}", indexString);
-            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "indexStr",indexString);
+            LoggerUtil.debug(LOGGER, logFormat, "initFromFile", "indexString", indexString);
             sparseIndex = JSONObject.parseObject(indexString, new TypeReference<TreeMap<String, Position>>() {
             });//存到稀疏索引
             this.tableMetaInfo = tableMetaInfo;//记录文件索引信息
@@ -188,7 +189,21 @@ public class SsTable implements Closeable {
      */
     public static SsTable createFromMemTable(String filePath, int partSize, TreeMap<String, Command> memTable) {
         SsTable ssTable = new SsTable(filePath, partSize);
-        ssTable.initFromMemTable(memTable);
+        ssTable.initFromMemTable(memTable,"initFromMemTable");
+        return ssTable;
+    }
+
+    /**
+    * @描述  根据压缩表创建ssTable
+    * @param filePath
+    * @param partSize
+    * @param compressTable
+    * @return SsTable
+    * @Author taoxier
+    */
+    public static SsTable createFromCompressTable(String filePath, int partSize, TreeMap<String, Command> compressTable) {
+        SsTable ssTable = new SsTable(filePath, partSize);
+        ssTable.initFromMemTable(compressTable,"initFromCompressTable");
         return ssTable;
     }
 
@@ -273,6 +288,30 @@ public class SsTable implements Closeable {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public TreeMap<String, Position> getSparseIndex() {
+        return sparseIndex;
+    }
+
+    public void setSparseIndex(TreeMap<String, Position> sparseIndex) {
+        this.sparseIndex = sparseIndex;
+    }
+
+    public TableMetaInfo getTableMetaInfo() {
+        return tableMetaInfo;
+    }
+
+    public void setTableMetaInfo(TableMetaInfo tableMetaInfo) {
+        this.tableMetaInfo = tableMetaInfo;
+    }
+
+    public RandomAccessFile getTableFile() {
+        return tableFile;
+    }
+
+    public String getFilePath() {
+        return filePath;
     }
 
     @Override
