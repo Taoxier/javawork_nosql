@@ -9,14 +9,17 @@ import java.io.IOException;
  * @描述
  */
 public class test {
-    public static void main(String[] args) throws IOException {
-        File file=new File("data/test");
-        if (!file.exists()){
-            file.createNewFile();
-            System.out.println("创建文件");
-        }
-        if (file.delete()){
-            System.out.println("shanchu");
+    public static void main(String[] a)throws IOException{
+        showDir(1, new File("D:\\IdeaProjects\\javaBigWork\\nosqlJavaWork\\src\\main\\java"));
+    }
+    static void showDir(int indent, File file) throws IOException {
+        for (int i = 0; i < indent; i++)
+            System.out.print('-');
+        System.out.println(file.getName());
+        if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            for (int i = 0; i < files.length; i++)
+                showDir(indent + 4, files[i]);
         }
     }
 }

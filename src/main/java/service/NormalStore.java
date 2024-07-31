@@ -50,15 +50,10 @@ public class NormalStore implements Store {
     private final Logger LOGGER = LoggerFactory.getLogger(NormalStore.class);
     private final String logFormat = "[NormalStore][{}]: {}";
 
-//    private final int STORE_THRESHOLD = 1;
-//    private final int LOG_COMPRESSION_THRESHOLD = 2;
-
-
     /*
         1.内存，三个区，稀疏索引，查的时候按稀疏索引，看tinykvstore
         2.多线程压缩，看那个3.log那个思路
      */
-
 
     /**
      * 内存表，类似缓存
@@ -600,6 +595,9 @@ public class NormalStore implements Store {
                 switchMemTable();
                 storeSsTable();
             }
+            //检查是否需要压缩
+            checkIfCompress();
+
         } catch (Throwable t) {
             throw new RuntimeException(t);
         } finally {

@@ -8,6 +8,11 @@
 package client;
 import java.util.Scanner;
 
+/**
+* >mvn compile
+ *>java -cp target/classes example.CmdClientUsage localhost 12345
+*/
+
 public class CmdClient implements Client {
     private SocketClient socketClient;
     private Scanner scanner;
@@ -56,7 +61,7 @@ public class CmdClient implements Client {
                     System.out.println("---【退出命令行客户端】---");
                     break;
                 default:
-                    System.out.println("--->未知命令，请输入 set/get/rm/exit 中的一个。");
+                    System.out.println("-->未知命令，请输入 set/get/rm/exit 中的一个。");
             }
         }
         scanner.close();
