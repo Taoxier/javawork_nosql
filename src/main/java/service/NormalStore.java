@@ -554,7 +554,16 @@ public class NormalStore implements Store {
                     }
                 }
             }
-
+            //如果还找不到，可能处于压缩过程，从暂存ssTables列表中找
+            if (command == null&&immutableSsTables!=null) {
+                for (SsTable ssTable : immutableSsTables) {
+                    command = ssTable.query(key);
+                    if (command != null) {
+                        //找到就退出循环
+                        break;
+                    }
+                }
+            }
             if (command instanceof SetCommand) {
                 //如果是set命令 返回对应的值
                 return ((SetCommand) command).getValue();

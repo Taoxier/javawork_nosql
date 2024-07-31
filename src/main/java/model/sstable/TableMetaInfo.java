@@ -25,12 +25,12 @@ public class TableMetaInfo {
     private long dataLen;
 
     /**
-     * 索引区开始
+     * 稀疏索引区开始
      */
     private long indexStart;
 
     /**
-     * 索引区长度
+     * 稀疏索引区长度
      */
     private long indexLen;
 
