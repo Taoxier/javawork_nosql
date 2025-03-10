@@ -1,38 +1,5 @@
-# zhku java高级编程期末考核-实现kv型数据库
+# 实现kv型数据库
 
-## 前菜-使用shell实现简单的数据库
-使用shell实现增加和查询的功能：
-```shell
-#!/bin/bash
-
-easy_set() {
-        echo "$1,$2" >> easy-db
-}
-
-easy_get() {
-        grep "^$1," easy-db | sed -e "s/^$1,//" | tail -n 1
-}
-```
-for-test:
-
-```
-~/workspace/javaspace/easy-db » source db_shell.sh                                                      urmsone@urmsonedeMacBook-Pro
--------------------------------------------------------------------------------------------------------------------------------------
-~/workspace/javaspace/easy-db » easy_set zsy1 value1                                                    urmsone@urmsonedeMacBook-Pro
--------------------------------------------------------------------------------------------------------------------------------------
-~/workspace/javaspace/easy-db » easy_set zsy2 value2                                                    urmsone@urmsonedeMacBook-Pro
--------------------------------------------------------------------------------------------------------------------------------------
-~/workspace/javaspace/easy-db » easy_set zsy3 value3                                                    urmsone@urmsonedeMacBook-Pro
--------------------------------------------------------------------------------------------------------------------------------------
-~/workspace/javaspace/easy-db » easy_get zsy3                                                           urmsone@urmsonedeMacBook-Pro
-value3
--------------------------------------------------------------------------------------------------------------------------------------
-~/workspace/javaspace/easy-db » cat easy-db                                                             urmsone@urmsonedeMacBook-Pro
-zsy1,value1
-zsy2,value2
-zsy3,value3
--------------------------------------------------------------------------------------------------------------------------------------
-```
 ## 基于内存索引的kv数据库
 ### 需求分析
 数据库的基本功能：
